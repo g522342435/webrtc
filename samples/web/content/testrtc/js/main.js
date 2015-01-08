@@ -12,7 +12,12 @@
 
 // Global WebAudio context that can be shared by all tests.
 // There is a very finite number of WebAudio contexts.
-var audioContext = new AudioContext();
+try {
+  window.AudioContext = window.AudioContext || window.webkitAudioContext;
+  var audioContext = new AudioContext();
+} catch (e) {
+    console.log('Failed to instantiate an audio context, error: ' + e);
+}
 var contentDiv = document.getElementById('content');
 var startButton = document.getElementById('start-button');
 var audioSelect = document.querySelector('select#audioSource');
@@ -23,11 +28,29 @@ var PREFIX_OK      = '[     OK ]';
 var PREFIX_FAILED  = '[ FAILED ]';
 var testSuites = [];
 var testFilters = [];
-var currentTest;
+var currentTest = {};
+var generalErrorDialog;
+var polymerLoaded = false;
+
+// If polymer-ready does not fire present the user with errors.
+window.addEventListener('load', function() {
+  if (!polymerLoaded) {
+    if (document.body.getAttribute('unresolved') === '') {
+    reportGeneralError_('No UI could be displayed due to Polymer not ' +
+                        'working in your browser, check compability here: ' +
+                        'https://www.polymer-project.org/resources/compatibility.html');
+    }
+  }
+});
 
 window.addEventListener('polymer-ready', function() {
-  var gum = new GumHandler();
-  gum.start();
+  polymerLoaded = true;
+  if (isBrowserWebRTCCapable_()) {
+    // TODO (jansson) Maybe move device enumeration to gumhandler.js?
+    MediaStreamTrack.getSources(gotSources);
+    var gum = new GumHandler();
+    gum.start();
+  }
 });
 
 // A test suite is a composition of many tests.
@@ -359,12 +382,6 @@ function appendOption(sourceInfo, option) {
   }
 }
 
-if (typeof MediaStreamTrack === 'undefined') {
-  reportFatal('This browser does not support MediaStreamTrack.\n Try Chrome Canary.');
-} else {
-  MediaStreamTrack.getSources(gotSources);
-}
-
 function testIsDisabled(testName) {
   if (testFilters.length === 0) {
     return false;
@@ -431,4 +448,41 @@ function setTimeoutWithProgressBar(timeoutCallback, timeoutMs) {
   if (filterParameterName in parameters) {
     testFilters = parameters[filterParameterName].split(',');
   }
+}
+
+// Checks that WebRTC present in order for TestRTC to run.
+function isBrowserWebRTCCapable_() {
+  // Check if adapter.js detects getUserMedia.
+  if (webrtcDetectedBrowser === null && webrtcDetectedVersion === null) {
+    reportGeneralError_('WebRTC is not detected, try a WebRTC compatible ' +
+                        'browser: http://www.webrtc.org/');
+    return false;
+  }
+  return true;
+}
+
+function reportGeneralError_(message) {
+  // If polymer fails create a div and hide the broken UI.
+  if (document.body.getAttribute('unresolved') === '') {
+    if (typeof generalErrorDialog === 'undefined' ) {
+      generalErrorDialog = document.createElement('div');
+      generalErrorDialog.innerHTML = '<h1>' + document.title + '</h1>';
+      // Hide the nonfunctional UI.
+      var main = document.getElementById('main');
+      main.setAttribute('style', 'display:none');
+      // Remove the unresolved attribute in order to display the error msg.
+      document.body.removeAttribute('unresolved');
+    }
+  // Use polymer if loaded.
+  } else if (typeof generalErrorDialog === 'undefined') {
+      generalErrorDialog = document.createElement('paper-dialog');
+      generalErrorDialog.innerHTML = '<h1>' + document.title + '</h1>';
+      generalErrorDialog.setAttribute('autoCloseDisabled', '');
+      generalErrorDialog.setAttribute('backdrop', '');
+      generalErrorDialog.open();
+  }
+  // Post the error message to the dialog.
+  generalErrorDialog.appendChild(document.createTextNode(message));
+  generalErrorDialog.appendChild(document.createElement('br'));
+  document.body.insertBefore(generalErrorDialog, document.body.firstChild);
 }
